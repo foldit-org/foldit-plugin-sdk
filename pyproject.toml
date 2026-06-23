@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "foldit-plugin-sdk"
+version = "0.1.0"
+description = "Foldit plugin SDK - protocol types, the Plugin trait, and plugin-author utilities"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Andreas Petrides" }]
+keywords = [
+  "plugin",
+  "protein",
+  "rosetta",
+  "bioinformatics",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Repository = "https://github.com/foldit-org/foldit-plugin-sdk"
+
+[tool.maturin]
+features = ["python", "extension-module"]
+bindings = "pyo3"
+module-name = "foldit_plugin_sdk"
+# Mixed Rust/Python project: the compiled pyo3 extension is merged into the
+# `python/foldit_plugin_sdk/` package so plugin-author utilities written in
+# pure Python ship alongside the native bindings.
+python-source = "python"

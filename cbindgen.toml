@@ -1,0 +1,7 @@
+language = "C"
+usize_is_size_t = true
+cpp_compat = true
+header = "#pragma once"
+
+[export]
+exclude = []

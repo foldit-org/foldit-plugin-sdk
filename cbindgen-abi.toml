@@ -1,0 +1,52 @@
+language = "C"
+usize_is_size_t = true
+cpp_compat = true
+header = "#pragma once"
+
+# Scoped to the abi C-ABI surface only. This allowlist names every type the
+# plugin ABI header exports; the disjoint blocklist below names every non-ABI
+# crate-root const so it cannot leak in.
+[export]
+include = [
+    "FolditPluginAssemblyPayloadKind",
+    "FolditPluginStatus",
+    "FolditPluginBuffer",
+    "FolditPluginError",
+    "FolditPluginVec3",
+    "FolditPluginResidueRef",
+    "FolditPluginDispatchContext",
+    "FolditPluginParamTag",
+    "FolditPluginParamValue",
+    "FolditPluginParamEntry",
+    "FolditPluginHandle",
+    "FolditPluginVtable",
+    "FolditPluginVtableFn",
+    "FOLDIT_PLUGIN_ABI_VERSION",
+]
+# Load-bearing blocklist, not a convenience: cbindgen 0.29 collects every
+# `pub const` in the parsed crate (the [export] include list above is
+# additive, not a strict allowlist, and [parse] only scopes by crate, not by
+# module), so any non-ABI const reachable from the crate root would leak into
+# this header unless named here. A new crate-root `pub const` must be added
+# below or it ships in the plugin ABI surface.
+exclude = [
+    "DEFAULT_DESIGN_STEPS",
+    "DEFAULT_STEP_SCALE",
+    "DEFAULT_NUM_RECYCLES",
+    "STREAM_NONE",
+    "STREAM_PROGRESS",
+    "STREAM_INTERMEDIATE",
+    "ICEORYX_SIGNAL",
+    "MAX_SLICE_LEN",
+    "SIZE_WARNING_THRESHOLD",
+    "PYTHON_HOST_ABI_VERSION",
+]
+
+[parse]
+parse_deps = false
+
+[enum]
+# QualifiedScreamingSnakeCase yields ENUM_NAME_VARIANT, e.g.
+# FOLDIT_PLUGIN_STATUS_OK. Applied uniformly so the generated constant names
+# are predictable from the Rust variants.
+rename_variants = "QualifiedScreamingSnakeCase"

@@ -1,0 +1,712 @@
+// Foldit Unified Plugin Protocol
+//
+// Backend-agnostic plugin protocol. Replaces the ML-specific shapes in
+// ml.proto. ML plugins (simplefold, foundry, dummy) and Rosetta
+// are equal citizens behind this surface.
+//
+// Authority lives with the orchestrator: it owns the canonical Assembly,
+// dispatches it to plugins via Init/UpdateAssembly, and integrates results
+// flowing back from Invoke / StartStream.
+//
+// See docs/PLUGIN_PROTOCOL.md for the design rationale.
+
+syntax = "proto3";
+
+// See common.proto for rationale - same lite-runtime choice.
+option optimize_for = LITE_RUNTIME;
+
+package foldit.plugin;
+
+// ============================================================================
+// Common types
+// ============================================================================
+
+// 3D vector for non-selection-derived spatial parameters (pull targets, etc.).
+// Selection-derived 3D positions travel via DispatchContext, not params.
+message Vec3 {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+// Entity-type taxonomy. Used by PluginOp.compatible_focus_types to gate
+// which focused entities an op accepts. Mirrors molex::MoleculeType.
+enum EntityType {
+  ENTITY_TYPE_UNSPECIFIED = 0;
+  ENTITY_TYPE_PROTEIN = 1;
+  ENTITY_TYPE_NUCLEIC_ACID = 2;
+  ENTITY_TYPE_SMALL_MOLECULE = 3;
+  ENTITY_TYPE_BULK = 4;
+}
+
+// Reference to a specific residue inside an entity. Entity ids are
+// orchestrator-assigned; residue indices are 0-indexed within entity.
+message ResidueRef {
+  uint64 entity_id = 1;
+  uint32 residue_index = 2;
+}
+
+// Wire-level error payload. Plugins return this in the error variant of
+// any response oneof. Recovery is orchestrator-driven (drop session,
+// restart with current Assembly).
+message Error {
+  string code = 1;             // machine-readable, e.g. "INVALID_INPUT"
+  string message = 2;          // human-readable
+  map<string, string> details = 3;
+}
+
+// ============================================================================
+// Dispatch context
+// ============================================================================
+
+// Captured by the orchestrator at op-trigger time and frozen on the wire.
+// Streams do NOT receive updated context mid-flight; only UpdateStream(params)
+// can change values during a running stream.
+message DispatchContext {
+  // The entity the user has focused in viso. Absent → no focus.
+  optional uint64 focused_entity_id = 1;
+
+  // Selection state at trigger time. Each ResidueRef carries its own
+  // entity_id; selections can span multiple entities. Empty → no selection.
+  repeated ResidueRef selection = 2;
+
+  // Residues the plugin may redesign (change identity at): the puzzle's
+  // design mask. Orthogonal to selection, which says where to operate.
+  // Each ResidueRef carries its own entity_id. Empty → no design gating.
+  repeated ResidueRef designable = 3;
+}
+
+// ============================================================================
+// Typed parameters
+// ============================================================================
+
+// Closed type set for parameter values. Residue / entity / range references
+// are NOT here - they travel via DispatchContext.
+enum ParamType {
+  PARAM_TYPE_UNSPECIFIED = 0;
+  PARAM_TYPE_INT = 1;
+  PARAM_TYPE_FLOAT = 2;
+  PARAM_TYPE_BOOL = 3;
+  PARAM_TYPE_STRING = 4;
+  PARAM_TYPE_ENUM = 5;     // encoded on the wire as string_value, validated by EnumValues constraint
+  PARAM_TYPE_VEC3 = 6;
+}
+
+// Wire-side parameter value. Mirrors ParamType as a oneof.
+message ParamValue {
+  oneof value {
+    int32 int_value = 1;
+    float float_value = 2;
+    bool bool_value = 3;
+    string string_value = 4;  // also used for ENUM
+    Vec3 vec3_value = 5;
+  }
+}
+
+// Constraint shape. Drives form rendering by convention:
+//   numeric + range  → slider
+//   string + enum_values → dropdown
+//   string + string_pattern → text input with validation
+//   bool             → checkbox
+message ParamConstraints {
+  oneof constraint {
+    IntRange int_range = 1;
+    FloatRange float_range = 2;
+    EnumValues enum_values = 3;
+    StringPattern string_pattern = 4;
+  }
+}
+
+message IntRange {
+  int32 min = 1;
+  int32 max = 2;
+}
+
+message FloatRange {
+  float min = 1;
+  float max = 2;
+}
+
+message EnumValues {
+  repeated string values = 1;
+}
+
+message StringPattern {
+  string pattern = 1;     // regex
+}
+
+// Per-parameter schema. The frontend renders form fields directly from
+// these. Parameters stay flat - no nested groups, no list parameters.
+message ParamSpec {
+  string name = 1;                       // map key in InvokeRequest.params
+  string display_name = 2;               // form-field label
+  string description = 3;                // tooltip
+  ParamType type = 4;
+  optional ParamValue default = 5;
+  optional ParamConstraints constraints = 6;
+}
+
+// ============================================================================
+// Registration metadata
+// ============================================================================
+
+// Op invocation kind.
+enum OpKind {
+  OP_KIND_UNSPECIFIED = 0;
+  OP_KIND_INVOKE = 1;     // single-shot (Invoke endpoint)
+  OP_KIND_STREAM = 2;     // long-running (StartStream / PollStream / ...)
+}
+
+// Per-op metadata. User-facing.
+//
+// Lock semantics (enforced by the orchestrator above the wire):
+//   - compatible_focus_types empty   → op runs global; locks globally.
+//   - compatible_focus_types non-empty:
+//       focused entity present AND its type ∈ compatible_focus_types
+//         → lock just the focused entity (+ create-barrier if creates_entities).
+//       otherwise (no focus, or type mismatch)
+//         → fall back to global lock.
+//   - creates_entities → global "create barrier" alongside the focus
+//     lock; prevents concurrent create-ops from racing.
+message PluginOp {
+  reserved 6;
+  reserved "supports_score";
+  string id = 1;                                      // magic word, e.g. "wiggle"
+  string display_name = 2;                            // UI label, e.g. "Wiggle"
+  string description = 3;                             // tooltip / help text
+  OpKind kind = 4;
+  repeated ParamSpec params = 5;                      // empty for click-to-fire ops
+  repeated EntityType compatible_focus_types = 7;     // see lock semantics above
+  bool creates_entities = 8;                          // see lock semantics above
+
+  // Optional click-to-fire icon. Mutually exclusive with non-empty `params`
+  // - ops with params render forms, no icon needed.
+  oneof ui {
+    bytes icon = 9;
+  }
+}
+
+// Query metadata. Queries READ state - they don't mutate entities, don't
+// take entity locks, and don't return assembly bytes. Concurrent queries
+// on the same entity are safe.
+//
+// DispatchContext is still passed (queries can scope to focused entity or
+// selection - e.g. "rama colors for the focused protein", "score breakdown
+// for selected residues") but no `compatible_focus_types` or
+// `creates_entities` because there are no locks to take.
+//
+// Examples: get_phi_psi, score_breakdown, rotamer_preview, sequence_design
+// (returns N candidate sequences without committing them - a separate
+// `apply_sequence` op commits one).
+//
+// Queries are single-shot. Long-running interactive read patterns (rama
+// drag, pull) are ops, not queries - they mutate state.
+message PluginQuery {
+  string id = 1;                       // magic word, e.g. "get_phi_psi"
+  string display_name = 2;             // UI label
+  string description = 3;              // tooltip / help text
+  repeated ParamSpec params = 4;       // typed schema, same shape as ops
+}
+
+// Plugin-level metadata. Internal/diagnostic only. Users never see plugin
+// names - they see op display names.
+message PluginRegistration {
+  reserved 3, 4;
+  reserved "supports_score", "supports_per_residue_score";
+  string id = 1;                              // routing/log id, e.g. "rosetta"
+  string version = 2;                         // for compat/upgrade checks
+  repeated PluginOp operations = 5;           // mutating ops
+  repeated PluginQuery queries = 6;           // read-only queries
+}
+
+// ============================================================================
+// Lifecycle endpoints (typed)
+// ============================================================================
+
+// A puzzle-specific asset delivered alongside the structure at session-init
+// (a ligand `.params` file, an optional conformer PDB, etc.). `name` is the
+// asset's file name (e.g. "LG1.params"); `data` is its raw bytes. Empty for
+// protein-only puzzles.
+message PuzzleAsset {
+  string name = 1;
+  bytes data = 2;
+}
+
+// One atom reference inside a catalytic constraint: an atom name plus the
+// residue it belongs to (residue number + chain). Mirrors foldit-core's
+// puzzle_setup::AtomRef; chain travels as a single-char string (proto has no
+// char type).
+message ConstraintAtom {
+  string atom_name = 1;
+  int32 res_num = 2;
+  string chain = 3;
+}
+
+// Geometric relation a constraint pins; the count of ConstraintAtoms follows
+// from the kind (AtomPair=2, Angle=3, Dihedral=4). Mirrors
+// puzzle_setup::ConstraintKind.
+enum ConstraintKind {
+  CONSTRAINT_KIND_UNSPECIFIED = 0;
+  CONSTRAINT_KIND_ATOM_PAIR = 1;
+  CONSTRAINT_KIND_ANGLE = 2;
+  CONSTRAINT_KIND_DIHEDRAL = 3;
+}
+
+// Penalty function for a constraint. A oneof over the two function shapes
+// (mirrors puzzle_setup::ConstraintFunc): flat-bottomed harmonic and circular
+// (periodic) harmonic.
+message ConstraintFunc {
+  oneof func {
+    FlatHarmonic flat_harmonic = 1;
+    CircularHarmonic circular_harmonic = 2;
+  }
+}
+
+message FlatHarmonic {
+  double x0 = 1;
+  double sd = 2;
+  double tol = 3;
+}
+
+message CircularHarmonic {
+  double x0 = 1;
+  double sd = 2;
+}
+
+// One catalytic constraint. Mirrors puzzle_setup::Constraint.
+message Constraint {
+  ConstraintKind kind = 1;
+  repeated ConstraintAtom atoms = 2;
+  ConstraintFunc func = 3;
+}
+
+// Init(assembly) → (SessionId, PluginRegistration)
+//
+// Plugin self-configures from its own host-process config (env / config file);
+// no init params on the wire. Spawn a different worker for a different config.
+//
+// `assets` / `constraints` carry the puzzle-specific payload that rides the
+// session-init path (ligand asset bytes + typed catalytic constraints).
+// `params` carries the generic puzzle-config channel (weight-patch entries as
+// `weight.<scoretype>`, objective filters as `filter.<i>.*`), same shape as the
+// Invoke path. Additive and backward-compatible: protein-only puzzles send all
+// empty, and plugins that don't consume them (every Python plugin) ignore them.
+message InitRequest {
+  bytes assembly = 1;     // assembly bytes (canonical)
+  repeated PuzzleAsset assets = 2;
+  repeated Constraint constraints = 3;
+  map<string, ParamValue> params = 4;
+}
+
+message InitResponse {
+  oneof response {
+    InitSuccess success = 1;
+    Error error = 2;
+  }
+}
+
+message InitSuccess {
+  uint64 session = 1;
+  PluginRegistration registration = 2;
+  // assembly bytes of the assembly the plugin actually settled on after
+  // Init's internal normalization (e.g. Rosetta builds a full-atom pose
+  // from the PDB-parsed input, which may add missing atoms, hydrogens,
+  // or terminal O, so the atom count may change). Empty when the
+  // plugin's post-Init assembly is byte-identical to the input (host
+  // then keeps its current assembly). Host uses this to seed its
+  // canonical assembly at session-load so subsequent ops never cross
+  // an atom-set boundary mid-action (which would force a position-snap
+  // because there is no atom-to-atom correspondence to interpolate).
+  bytes initial_assembly = 3;
+}
+
+// UpdateAssembly(session, assembly): replace the working assembly after
+// user edits, undo, broadcasts from other plugins, etc.
+//
+// Payload is either a full Assembly (`full`) or a delta edit
+// list (`delta`). Both produce equivalent end state; `delta` lets
+// stateful plugins preserve derived data across mutations.
+//
+// `from_gen` / `to_gen` are the host's broadcast generation counters.
+// `from_gen` is the gen the plugin should currently hold; `to_gen` is
+// the gen after applying this payload. A plugin that detects
+// `from_gen != its local gen` returns `Error{code: "STALE_GEN"}` on
+// its next Invoke / Query / Score; the host responds by re-sending a
+// `full` UpdateAssembly and retrying once. Plugins do not originate
+// recovery messages - recovery rides the error channel.
+message UpdateAssemblyRequest {
+  uint64 session = 1;
+  // Wire-compat with senders that previously emitted `bytes assembly = 2`:
+  // proto3 oneof preserves the field number, so legacy bytes parse as
+  // the `full` arm.
+  oneof payload {
+    bytes full = 2;
+    bytes delta = 3;
+  }
+  uint64 from_gen = 4;
+  uint64 to_gen = 5;
+}
+
+message UpdateAssemblyResponse {
+  optional Error error = 1;       // unset → success
+}
+
+// Drop(session): tear down a session.
+message DropRequest {
+  uint64 session = 1;
+}
+
+message DropResponse {
+  optional Error error = 1;
+}
+
+message ResidueTermScores {
+  ResidueRef residue = 1;
+  repeated float terms = 2;   // raw unweighted, aligned to ScoreReport.term_names
+}
+
+// Plugin-contributed score breakdown, returned as the payload of the
+// well-known "score" Query. Every plugin that scores registers
+// `score` in its PluginRegistration.queries; the host calls each one
+// per UpdateAssembly broadcast and merges the results into an app-wide
+// score view.
+//
+// The plugin ships only the RAW unweighted breakdown; the host owns the
+// weighting (multiplies by its session weight map to produce the displayed
+// total and per-residue coloring). Arrays align to term_names: same order,
+// same length. Half-split already applied.
+message ScoreReport {
+  reserved 1, 2, 3;
+  reserved "total", "terms", "per_residue";
+  repeated string term_names = 4;
+  repeated float whole_pose_terms = 5;
+  repeated ResidueTermScores per_residue_terms = 6;
+  // Labeled puzzle-objective bonuses, separate from the raw energy terms
+  // above. Each entry is one filter's contribution (already in raw rosetta
+  // energy, same sign convention as the energy terms; the host adds these
+  // into the headline total alongside the weighted raw terms). Empty for a
+  // free-form session or a puzzle that forwarded no filters.
+  repeated BonusContribution bonus_breakdown = 7;
+}
+
+// One labeled entry in ScoreReport.bonus_breakdown. `kind` is the filter's
+// internal name (e.g. "DisulfideCountScore"); `value` is its raw rosetta
+// energy contribution.
+message BonusContribution {
+  string kind = 1;
+  float value = 2;
+}
+
+// A void distance field on a regular grid: phi[x*ny*nz + y*nz + z] is the
+// distance from the nearest atom surface (>= 0 inside a void, sentinel-
+// negative on exterior/masked cells). The host forwards it to viso, which
+// meshes the isosurface at `threshold`. Row-major, x-major.
+message VoidField {
+  uint32 nx = 1;
+  uint32 ny = 2;
+  uint32 nz = 3;
+  Vec3 origin = 4;     // world position of grid cell (0,0,0)
+  Vec3 spacing = 5;    // Angstrom per voxel, per axis (dx, dy, dz)
+  repeated float phi = 6;   // nx*ny*nz values, x-major row-major
+  float threshold = 7;      // iso level (Angstrom) at which the void surface is drawn
+}
+
+// One endpoint of a clash: an atom identified structurally so viso can
+// re-resolve its position every frame (live-tracking). Atom by PDB name.
+message ClashAtom {
+  ResidueRef residue = 1;   // reuse the existing entity+residue ref
+  string atom_name = 2;     // PDB atom name, e.g. "CB", "NE2"
+}
+
+// A detected steric clash between two atoms. `severity` is the per-pair
+// LJ repulsion (fa_rep).
+message Clash {
+  ClashAtom a = 1;
+  ClashAtom b = 2;
+  float severity = 3;
+}
+
+// Payload of the `clashes` query. Empty `clashes` = no clashes / clear.
+message ClashReport {
+  repeated Clash clashes = 1;
+}
+
+// Payload of the `exposed_hydrophobics` query. Each entry is a residue the
+// detector flagged as an exposed hydrophobic. Empty `exposed` = none / clear.
+message ExposedHydrophobicReport {
+  repeated ResidueRef exposed = 1;
+}
+
+// Kind of structural connection between two endpoints. The host maps each
+// type onto its own viz channel.
+enum ConnectionType {
+  CONNECTION_TYPE_UNSPECIFIED = 0;
+  CONNECTION_TYPE_HBOND = 1;
+  CONNECTION_TYPE_DISULFIDE = 2;
+  CONNECTION_TYPE_CLASH = 3;
+  CONNECTION_TYPE_BAND = 4;
+}
+
+// One atom endpoint of a connection, identified structurally so viso can
+// re-resolve its position every frame (live-tracking). Atom by PDB name.
+message ConnectionAtom {
+  ResidueRef residue = 1;   // reuse the existing entity+residue ref
+  string atom_name = 2;     // PDB atom name, e.g. "CB", "NE2", "SG"
+}
+
+// One endpoint of a connection: either an atom (resolved per-frame) or a
+// fixed world-space anchor (e.g. a band tethered to empty space).
+message AtomEnd {
+  oneof end {
+    ConnectionAtom atom = 1;
+    Vec3 anchor = 2;        // anchor variant has no producer yet (bands)
+  }
+}
+
+// A generic structural connection between two endpoints. `magnitude` carries
+// clash severity (LJ fa_rep); unset for hbond/disulfide.
+message Connection {
+  ConnectionType type = 1;
+  AtomEnd a = 2;
+  AtomEnd b = 3;
+  optional float magnitude = 4;
+}
+
+// Payload of the `connections` query. Empty `connections` = none / clear.
+message ConnectionReport {
+  repeated Connection connections = 1;
+}
+
+// ============================================================================
+// Generic dispatch - Ops (mutating)
+// ============================================================================
+//
+// Ops mutate state. The orchestrator takes entity locks per the metadata
+// in `PluginOp` (compatible_focus_types + creates_entities), forwards the
+// request, and on success copies the locked-entity slices from the
+// returned assembly into canonical state.
+//
+// All op responses carry the plugin's working assembly post-op. Ops with
+// nothing to return shouldn't be ops - they should be queries (see below).
+
+// Invoke(session, op, context, params) → assembly | error
+message InvokeRequest {
+  uint64 session = 1;
+  string op = 2;
+  DispatchContext context = 3;
+  map<string, ParamValue> params = 4;
+}
+
+// `assembly` is the plugin's working assembly post-op. The orchestrator
+// extracts locked-entity slices and copies them into canonical state;
+// other entities are ignored (plugins shouldn't mutate non-locked
+// entities, but the orchestrator doesn't trust that - it just takes the
+// locked slice).
+message InvokeResponse {
+  oneof response {
+    bytes assembly = 1;
+    Error error = 2;
+  }
+}
+
+// StartStream(session, op, context, params, request_id) → Ok | error
+//
+// `request_id` is assigned by the orchestrator and flows down: it is the
+// stream id the plugin keys every subsequent UpdateStream / PollStream /
+// CancelStream on.
+message StartStreamRequest {
+  uint64 session = 1;
+  string op = 2;
+  DispatchContext context = 3;
+  map<string, ParamValue> params = 4;
+  uint64 request_id = 5;
+}
+
+message StartStreamResponse {
+  optional Error error = 1;       // unset → success
+}
+
+// PollStream(request_id) → Pending | Final | Error
+//
+// Polling-based: client drives cadence. Plugins coalesce - between polls
+// only the latest snapshot survives. Critical for interactive-drag patterns
+// where high-frequency inputs outpace the plugin's apply rate.
+message PollStreamRequest {
+  uint64 request_id = 1;
+}
+
+message PollStreamResponse {
+  oneof result {
+    StreamPending pending = 1;
+    StreamCancelled cancelled = 2;
+    StreamFinal final = 3;
+    Error error = 4;
+    StreamCheckpoint checkpoint = 5;
+  }
+}
+
+// Snapshot during a running stream. latest_assembly is the working state at
+// the moment of polling; not yet authoritative until the orchestrator decides
+// to promote it. Progress fields are optional - plugins that don't track
+// progress simply omit them.
+message StreamPending {
+  bytes latest_assembly = 1;
+  optional float progress = 2;            // 0.0 .. 1.0
+  optional string stage = 3;              // human-readable, e.g. "sampling"
+  // Warm score of latest_assembly; absent for plugins that don't score.
+  optional ScoreReport score = 4;
+}
+
+// An accepted intermediate state the host should commit into canonical
+// state while the stream keeps running. Shaped like StreamPending, but
+// non-terminal in a different sense: a pending is a preview frame the
+// host may discard, whereas a checkpoint is "commit this and continue"
+// (incremental-promote ops). More checkpoints or a terminal follow.
+message StreamCheckpoint {
+  bytes latest_assembly = 1;
+  optional float progress = 2;            // 0.0 .. 1.0
+  optional string stage = 3;              // human-readable, e.g. "sampling"
+  // Warm score of latest_assembly; absent for plugins that don't score.
+  optional ScoreReport score = 4;
+}
+
+// Host-requested cancel that returned a usable working pose. Distinct
+// from `error` because for open-ended streaming ops (wiggle, shake,
+// repack/design loops, etc.) the only terminal the user ever sees is
+// the host-initiated cancel; treating it as a failure forces the host
+// to carve out "for this code, actually treat it as success", which
+// is what produced the cross-stream commit race the terminal split
+// fixes. The orchestrator promotes `assembly` into canonical state
+// using the same rule as Final (locked-entity slices copied; other
+// entities ignored). Reserved for terminals that follow a
+// CancelStream request; spontaneous failures (watchdog eviction,
+// mid-action exception, transport drop) still ride `error`.
+message StreamCancelled {
+  bytes assembly = 1;
+  // Warm score of assembly; absent for plugins that don't score.
+  optional ScoreReport score = 2;
+}
+
+// Final result of a stream. Assembly is the definitive output the
+// orchestrator promotes into canonical state (locked-entity slices
+// copied; other entities ignored - same rule as Invoke).
+message StreamFinal {
+  bytes assembly = 1;
+  // Warm score of assembly; absent for plugins that don't score.
+  optional ScoreReport score = 2;
+}
+
+// UpdateStream(request_id, params): push new params to a running stream.
+// Used for pull-target updates, rama-drag ticks, etc. The plugin's metadata
+// declares which params are updatable; values for non-updatable params are
+// silently ignored.
+message UpdateStreamRequest {
+  uint64 request_id = 1;
+  map<string, ParamValue> params = 2;
+}
+
+message UpdateStreamResponse {
+  optional Error error = 1;
+}
+
+// CancelStream(request_id): stop a running stream. Idempotent.
+message CancelStreamRequest {
+  uint64 request_id = 1;
+}
+
+message CancelStreamResponse {
+  optional Error error = 1;
+}
+
+// ============================================================================
+// Generic dispatch - Queries (reading)
+// ============================================================================
+//
+// Queries READ state. They don't mutate entities, don't take entity locks,
+// and don't return assembly bytes. The orchestrator does NOT lock-check
+// queries - concurrent queries on the same entity are safe. Mutations may
+// race with queries; the protocol gives no consistency guarantee mid-op.
+//
+// Queries are single-shot. Streaming queries don't currently exist;
+// long-running interactive read patterns (rama drag, pull) are ops, not
+// queries - they mutate state.
+
+// Query(session, query_id, context, params) → data | error
+message QueryRequest {
+  uint64 session = 1;
+  string query = 2;                    // matches a registered PluginQuery.id
+  DispatchContext context = 3;
+  map<string, ParamValue> params = 4;
+  // Present → read/score this specific assembly (a composition: an in-flight
+  // edit's lanes over its peers' committed heads, or a checkpoint) instead of
+  // the plugin's session. Read-only; never mutates the session. Absent → the
+  // query operates on the session / its in-flight snapshot. This is the one
+  // sanctioned assembly-arg query path (the well-known "score" query reads it
+  // for LA2 multi-entity composition); it replaces the retired standalone
+  // CompositionScore transport.
+  optional bytes assembly = 5;
+}
+
+// `data` is query-defined opaque bytes. Plugin and the consuming Tier 2
+// panel agree on the encoding (e.g. UTF-8 JSON for sequence-design
+// candidates, packed float arrays for rama colors). The orchestrator
+// forwards `data` to the requesting client without inspecting it.
+message QueryResponse {
+  oneof response {
+    bytes data = 1;
+    Error error = 2;
+  }
+}
+
+// ============================================================================
+// Wire envelope
+// ============================================================================
+//
+// PluginRequest / PluginResponse wrap every per-endpoint message above so a
+// single byte stream between orchestrator and worker can carry any
+// request/response shape. The orchestrator's `PluginClient` encodes one
+// `PluginRequest` per call; the worker's runner decodes and dispatches by
+// the oneof tag.
+//
+// Streaming intermediates (StreamPending) ride inside `PollStream` polls
+// rather than as a separate push channel - the worker doesn't initiate
+// traffic; everything is request-response.
+
+message PluginRequest {
+  reserved 4;               // retired standalone CompositionScore transport
+  reserved "score";
+  oneof request {
+    InitRequest init = 1;
+    UpdateAssemblyRequest update_assembly = 2;
+    DropRequest drop = 3;
+    InvokeRequest invoke = 5;
+    StartStreamRequest start_stream = 6;
+    PollStreamRequest poll_stream = 7;
+    UpdateStreamRequest update_stream = 8;
+    CancelStreamRequest cancel_stream = 9;
+    QueryRequest query = 10;
+  }
+}
+
+message PluginResponse {
+  reserved 4;               // retired standalone CompositionScore transport
+  reserved "score";
+  oneof response {
+    InitResponse init = 1;
+    UpdateAssemblyResponse update_assembly = 2;
+    DropResponse drop = 3;
+    InvokeResponse invoke = 5;
+    StartStreamResponse start_stream = 6;
+    PollStreamResponse poll_stream = 7;
+    UpdateStreamResponse update_stream = 8;
+    CancelStreamResponse cancel_stream = 9;
+    QueryResponse query = 10;
+  }
+}
+
+// Stand-alone wrapper for `map<string, ParamValue>` so the C ABI can
+// take an opaque proto-encoded param map without forcing callers to
+// build a full request envelope.
+message ParamMap {
+  map<string, ParamValue> params = 1;
+}
