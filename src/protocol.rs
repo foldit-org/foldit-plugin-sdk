@@ -11,7 +11,10 @@ use crate::proto::plugin::ScoreReport;
 /// Reference to a specific residue inside an entity. Mirror of
 /// `proto::plugin::ResidueRef`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "python", pyclass(name = "ResidueRef", module = "foldit_plugin_sdk", from_py_object))]
+#[cfg_attr(
+    feature = "python",
+    pyclass(name = "ResidueRef", module = "foldit_plugin_sdk", from_py_object)
+)]
 pub struct ResidueRef {
     /// Entity the residue belongs to.
     pub entity_id: molex::EntityId,
@@ -41,7 +44,10 @@ impl ResidueRef {
 /// Streams do NOT receive an updated context mid-flight; only
 /// `UpdateStream(params)` can change values during a running stream.
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "python", pyclass(name = "DispatchContext", module = "foldit_plugin_sdk", from_py_object))]
+#[cfg_attr(
+    feature = "python",
+    pyclass(name = "DispatchContext", module = "foldit_plugin_sdk", from_py_object)
+)]
 pub struct DispatchContext {
     /// Entity the user has currently focused, or `None` for session
     /// mode (no specific entity targeted).

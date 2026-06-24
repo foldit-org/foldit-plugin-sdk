@@ -22,7 +22,11 @@ use crate::protocol::PollOutcome as RustPollOutcome;
 
 /// One labeled puzzle-objective bonus contribution. Mirrors
 /// `proto::plugin::BonusContribution`.
-#[pyclass(name = "BonusContribution", module = "foldit_plugin_sdk", from_py_object)]
+#[pyclass(
+    name = "BonusContribution",
+    module = "foldit_plugin_sdk",
+    from_py_object
+)]
 #[derive(Clone)]
 pub struct PyBonusContribution {
     inner: proto::BonusContribution,
@@ -58,7 +62,11 @@ impl PyBonusContribution {
 /// Per-residue raw term scores for one residue. Mirrors
 /// `proto::plugin::ResidueTermScores`; `terms` aligns to
 /// [`PyScoreReport::term_names`].
-#[pyclass(name = "ResidueTermScores", module = "foldit_plugin_sdk", from_py_object)]
+#[pyclass(
+    name = "ResidueTermScores",
+    module = "foldit_plugin_sdk",
+    from_py_object
+)]
 #[derive(Clone)]
 pub struct PyResidueTermScores {
     inner: ProtoResidueTermScores,
@@ -133,14 +141,8 @@ impl PyScoreReport {
             inner: ScoreReport {
                 term_names,
                 whole_pose_terms,
-                per_residue_terms: per_residue_terms
-                    .into_iter()
-                    .map(|r| r.inner)
-                    .collect(),
-                bonus_breakdown: bonus_breakdown
-                    .into_iter()
-                    .map(|b| b.inner)
-                    .collect(),
+                per_residue_terms: per_residue_terms.into_iter().map(|r| r.inner).collect(),
+                bonus_breakdown: bonus_breakdown.into_iter().map(|b| b.inner).collect(),
             },
         }
     }
@@ -264,11 +266,7 @@ impl PyPollOutcome {
     /// Op-level failure.
     #[staticmethod]
     #[must_use]
-    pub fn error(
-        code: String,
-        message: String,
-        details: HashMap<String, String>,
-    ) -> Self {
+    pub fn error(code: String, message: String, details: HashMap<String, String>) -> Self {
         Self {
             inner: RustPollOutcome::Error {
                 code,
@@ -329,8 +327,9 @@ impl PyPollOutcome {
     #[getter]
     pub fn stage(&self) -> Option<String> {
         match &self.inner {
-            RustPollOutcome::Pending { stage, .. }
-            | RustPollOutcome::Checkpoint { stage, .. } => stage.clone(),
+            RustPollOutcome::Pending { stage, .. } | RustPollOutcome::Checkpoint { stage, .. } => {
+                stage.clone()
+            }
             _ => None,
         }
     }

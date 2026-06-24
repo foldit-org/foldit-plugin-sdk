@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use crate::error::{PluginError, Result};
-use crate::protocol::{DispatchContext, ParamValue, PollOutcome};
 use crate::proto::plugin as proto;
+use crate::protocol::{DispatchContext, ParamValue, PollOutcome};
 
 /// Payload variant for [`Plugin::update_assembly`].
 ///
@@ -154,11 +154,7 @@ pub trait Plugin: Send {
     ///
     /// Default impl returns [`PluginError::Unsupported`]. Implementations
     /// return an error if the request id is unknown.
-    fn update_stream(
-        &self,
-        _request_id: u64,
-        _params: &HashMap<String, ParamValue>,
-    ) -> Result<()> {
+    fn update_stream(&self, _request_id: u64, _params: &HashMap<String, ParamValue>) -> Result<()> {
         Err(PluginError::Unsupported)
     }
 

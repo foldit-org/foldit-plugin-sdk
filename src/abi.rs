@@ -250,10 +250,8 @@ pub struct FolditPluginVtable {
     // Lifecycle
     /// Construct a plugin instance from a UTF-8 JSON-encoded config
     /// dict. Returns null on failure.
-    pub create: unsafe extern "C" fn(
-        config_json: *const c_char,
-        config_len: usize,
-    ) -> FolditPluginHandle,
+    pub create:
+        unsafe extern "C" fn(config_json: *const c_char, config_len: usize) -> FolditPluginHandle,
 
     /// Free the plugin instance. Called once; safe to assume no
     /// in-flight calls when invoked.
@@ -405,5 +403,4 @@ pub struct FolditPluginVtable {
 pub const VTABLE_SYMBOL: &[u8] = b"foldit_plugin_vtable\0";
 
 /// Type signature of the `foldit_plugin_vtable` entry symbol.
-pub type FolditPluginVtableFn =
-    unsafe extern "C" fn() -> *const FolditPluginVtable;
+pub type FolditPluginVtableFn = unsafe extern "C" fn() -> *const FolditPluginVtable;
