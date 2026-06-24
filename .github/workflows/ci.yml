@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format, Clippy, Test, Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install nightly toolchain (for rustfmt)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo +nightly fmt --check
+
+      - name: Clippy
+        run: cargo +stable clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        # Default features only: the `extension-module` feature makes pyo3 omit
+        # the libpython link, so a standalone test binary fails to resolve Py*
+        # symbols. Python bindings are exercised by the `python` job below.
+        run: cargo +stable test
+
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo +stable doc --no-deps --document-private-items
+
+  python:
+    name: Python binding tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (with embedded interpreter)
+        # setup-python provides a shared libpython; pyo3 links it (no
+        # extension-module), and auto-initialize boots an interpreter for the
+        # in-process tests. PYO3_PYTHON pins the interpreter explicitly.
+        run: PYO3_PYTHON=$(which python) cargo +stable test --features python,pyo3/auto-initialize
+
+  deny:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  publish-check:
+    name: Publish dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo publish --dry-run
+        run: cargo publish --dry-run

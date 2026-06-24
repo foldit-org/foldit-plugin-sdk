@@ -20,8 +20,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 prost = "0.13"
 thiserror = "2"
 # Only EntityId (raw()/from_raw()) is used; that surface is stable across
-# molex 0.5.x. The crate lives outside the foldit workspace, so [patch] below
-# resolves it from the sibling checkout for standalone builds.
+# molex 0.5.x.
 molex = "0.5"
 # Pinned to 0.29 to match foldit-python-host: the SDK's pyclasses cross
 # python-host's in-process boundary, so the pyo3 versions must agree.
@@ -33,11 +32,6 @@ prost-build = "0.13"
 # guards, so a looser bound drifts the generated header byte-for-byte from the
 # runner's committed copy even though the ABI is identical.
 cbindgen = "=0.29.2"
-
-# molex 0.5.x is not published to crates.io; resolve it from the sibling
-# foldit checkout (path relative to this manifest).
-[patch.crates-io]
-molex = { path = "../foldit/crates/molex" }
 
 [features]
 default = []
