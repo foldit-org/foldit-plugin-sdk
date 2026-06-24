@@ -25,6 +25,18 @@ pub struct ResidueRef {
 #[cfg(feature = "python")]
 #[pymethods]
 impl ResidueRef {
+    /// Build a residue ref from a raw entity id and 0-indexed residue
+    /// position. The host constructs these to populate a `DispatchContext`
+    /// on the receive path.
+    #[new]
+    #[must_use]
+    pub fn new(entity_id: u32, residue_index: u32) -> Self {
+        Self {
+            entity_id: molex::EntityId::from_raw(entity_id),
+            residue_index,
+        }
+    }
+
     /// Raw entity id (`u32`) the residue belongs to.
     #[must_use]
     #[getter]
@@ -64,6 +76,24 @@ pub struct DispatchContext {
 #[cfg(feature = "python")]
 #[pymethods]
 impl DispatchContext {
+    /// Build a dispatch context from a raw focused entity id (or `None` for
+    /// session mode) plus the selection + design-mask residue refs. The host
+    /// constructs these on the receive path before dispatching an op.
+    #[new]
+    #[pyo3(signature = (focused_entity_id = None, selection = vec![], designable = vec![]))]
+    #[must_use]
+    pub fn new(
+        focused_entity_id: Option<u32>,
+        selection: Vec<ResidueRef>,
+        designable: Vec<ResidueRef>,
+    ) -> Self {
+        Self {
+            focused_entity_id: focused_entity_id.map(molex::EntityId::from_raw),
+            selection,
+            designable,
+        }
+    }
+
     /// Raw id (`u32`) of the focused entity, or `None` in session mode.
     #[must_use]
     #[getter]
