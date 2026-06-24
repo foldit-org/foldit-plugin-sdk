@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "molex"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "flate2",
  "glam",
