@@ -165,7 +165,8 @@ enum OpKind {
 //       focused entity present AND its type ∈ compatible_focus_types
 //         → lock just the focused entity (+ create-barrier if creates_entities).
 //       otherwise (no focus, or type mismatch)
-//         → fall back to global lock.
+//         → fall back to global lock, UNLESS requires_focus is set, in
+//           which case the op refuses (empty target; button disabled).
 //   - creates_entities → global "create barrier" alongside the focus
 //     lock; prevents concurrent create-ops from racing.
 message PluginOp {
@@ -178,6 +179,12 @@ message PluginOp {
   repeated ParamSpec params = 5;                      // empty for click-to-fire ops
   repeated EntityType compatible_focus_types = 7;     // see lock semantics above
   bool creates_entities = 8;                          // see lock semantics above
+
+  // True only for ops that genuinely require a focused target (e.g. binder
+  // design); the lock model refuses them when no compatible entity is focused.
+  // Distinct from compatible_focus_types, which only TYPE-RESTRICTS an
+  // optional focus.
+  bool requires_focus = 10;
 
   // Optional click-to-fire icon. Mutually exclusive with non-empty `params`
   // - ops with params render forms, no icon needed.
