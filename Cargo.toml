@@ -22,7 +22,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 prost = "0.13"
 thiserror = "2"
 # Only EntityId (raw()/from_raw()) is used.
-molex = "0.7.1"
+molex = "0.7.2"
 # Pinned to 0.29 to match foldit-python-host: the SDK's pyclasses cross
 # python-host's in-process boundary, so the pyo3 versions must agree.
 pyo3 = { version = "0.29", optional = true }
