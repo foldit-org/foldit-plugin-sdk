@@ -6,13 +6,10 @@ them itself, at runtime, into its own ``cache_dir`` rather than erroring
 with "go run a CLI command".
 
 This module is the shared fetch machinery for plugins whose weights are a
-table of source URLs (simplefold). Each plugin owns its own URL
+table of source URLs (simplefold, foundry). Each plugin owns its own URL
 table (a list of :class:`WeightSpec`) and drives the download as a STREAM
 op so the host renders progress via ``StreamPending``; the query side
-reports presence via :func:`status_json`. foundry is the exception: its
-weights come from ``foundry_cli.install_model``, not a URL table, so it
-calls that directly and only reuses :func:`status_payload` for the query
-encoding.
+reports presence via :func:`status_json`.
 
 Pure stdlib (``urllib``) so it works in every plugin env without adding a
 dependency. Robustness is deliberately minimal:
