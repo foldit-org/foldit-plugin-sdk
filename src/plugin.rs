@@ -53,8 +53,12 @@ pub trait Plugin: Send {
     /// etc.). Plugins with no normalization step return an empty
     /// `Vec<u8>`; the host then keeps its input assembly.
     ///
-    /// `params` is the generic puzzle-config channel (weight-patch +
-    /// objective-filter entries); plugins that don't consume it ignore it.
+    /// `assets` carries the puzzle asset files delivered at Init (ligand
+    /// `.params`/conformer bytes, the electron-density map, etc.), each a
+    /// `(name, data)` pair; plugins that don't consume a given asset ignore
+    /// it. `params` is the generic puzzle-config channel (weight-patch +
+    /// objective-filter entries, plus density resolution/grid-spacing
+    /// scalars); plugins that don't consume it ignore it.
     ///
     /// # Errors
     ///
@@ -63,6 +67,7 @@ pub trait Plugin: Send {
     fn init(
         &self,
         assembly_bytes: &[u8],
+        assets: &[proto::PuzzleAsset],
         params: &HashMap<String, ParamValue>,
     ) -> Result<(u64, Vec<u8>)>;
 

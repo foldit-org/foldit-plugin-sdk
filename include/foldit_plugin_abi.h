@@ -9,7 +9,7 @@
 /**
  * Current ABI version. Bump on any layout change.
  */
-#define FOLDIT_PLUGIN_ABI_VERSION 6
+#define FOLDIT_PLUGIN_ABI_VERSION 7
 
 /**
  * Payload tag for [`FolditPluginVtable::update_assembly`].
@@ -286,6 +286,31 @@ typedef struct FolditPluginParamEntry {
 typedef void *FolditPluginHandle;
 
 /**
+ * One puzzle asset delivered at Init: a name plus its raw bytes.
+ * Borrowed view; the host owns the underlying memory for the duration
+ * of the `init` call. The name carries the original filename (extension
+ * included) so the plugin can sniff the asset's format.
+ */
+typedef struct FolditPluginAsset {
+  /**
+   * UTF-8 asset name (original filename); not null-terminated.
+   */
+  const uint8_t *name_data;
+  /**
+   * Byte length of `name_data`.
+   */
+  size_t name_len;
+  /**
+   * Pointer to the asset bytes.
+   */
+  const uint8_t *data;
+  /**
+   * Byte length of `data`.
+   */
+  size_t data_len;
+} FolditPluginAsset;
+
+/**
  * Function-pointer table exported by every native plugin dylib.
  *
  * The plugin exports a single C symbol (`foldit_plugin_vtable`) that
@@ -322,7 +347,9 @@ typedef struct FolditPluginVtable {
                                   struct FolditPluginError *out_err);
   /**
    * Open a session with the initial assembly bytes. Writes the
-   * assigned session id to `*out_session` on success. Also writes
+   * assigned session id to `*out_session` on success. `assets`
+   * carries the puzzle assets (e.g. a density map, ligand params) as
+   * borrowed name+bytes views valid only for this call. Also writes
    * assembly bytes of the assembly the plugin settled on after any
    * post-Init normalization (e.g. Rosetta builds a full-atom pose
    * from the input, which may add missing atoms, hydrogens, or
@@ -334,6 +361,8 @@ typedef struct FolditPluginVtable {
   FolditPluginStatus (*init)(FolditPluginHandle handle,
                              const uint8_t *assembly,
                              size_t assembly_len,
+                             const struct FolditPluginAsset *assets,
+                             size_t assets_len,
                              const struct FolditPluginParamEntry *params,
                              size_t params_len,
                              uint64_t *out_session,

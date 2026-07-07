@@ -38,7 +38,7 @@
 use std::os::raw::{c_char, c_void};
 
 /// Current ABI version. Bump on any layout change.
-pub const FOLDIT_PLUGIN_ABI_VERSION: u32 = 6;
+pub const FOLDIT_PLUGIN_ABI_VERSION: u32 = 7;
 
 /// Payload tag for [`FolditPluginVtable::update_assembly`].
 ///
@@ -229,6 +229,23 @@ pub struct FolditPluginParamEntry {
     pub value: FolditPluginParamValue,
 }
 
+/// One puzzle asset delivered at Init: a name plus its raw bytes.
+/// Borrowed view; the host owns the underlying memory for the duration
+/// of the `init` call. The name carries the original filename (extension
+/// included) so the plugin can sniff the asset's format.
+#[repr(C)]
+#[derive(Debug)]
+pub struct FolditPluginAsset {
+    /// UTF-8 asset name (original filename); not null-terminated.
+    pub name_data: *const u8,
+    /// Byte length of `name_data`.
+    pub name_len: usize,
+    /// Pointer to the asset bytes.
+    pub data: *const u8,
+    /// Byte length of `data`.
+    pub data_len: usize,
+}
+
 /// Plugin opaque handle. The plugin allocates this in `create` and
 /// frees it in `destroy`. The host treats it as opaque and threads it
 /// through every other call.
@@ -268,7 +285,9 @@ pub struct FolditPluginVtable {
     ) -> FolditPluginStatus,
 
     /// Open a session with the initial assembly bytes. Writes the
-    /// assigned session id to `*out_session` on success. Also writes
+    /// assigned session id to `*out_session` on success. `assets`
+    /// carries the puzzle assets (e.g. a density map, ligand params) as
+    /// borrowed name+bytes views valid only for this call. Also writes
     /// assembly bytes of the assembly the plugin settled on after any
     /// post-Init normalization (e.g. Rosetta builds a full-atom pose
     /// from the input, which may add missing atoms, hydrogens, or
@@ -280,6 +299,8 @@ pub struct FolditPluginVtable {
         handle: FolditPluginHandle,
         assembly: *const u8,
         assembly_len: usize,
+        assets: *const FolditPluginAsset,
+        assets_len: usize,
         params: *const FolditPluginParamEntry,
         params_len: usize,
         out_session: *mut u64,
