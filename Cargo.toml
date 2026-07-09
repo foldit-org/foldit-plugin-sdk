@@ -2,7 +2,7 @@
 
 [package]
 name = "foldit-plugin-sdk"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Andreas Petrides"]
 license = "MIT"
