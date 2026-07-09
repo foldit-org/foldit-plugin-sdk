@@ -3,7 +3,7 @@
 //! `DispatchContext` and `ResidueRef` (receive direction, read-only) carry
 //! their pyclass annotations inline in [`crate::protocol`]. The constructible
 //! types live here: a plugin builds a [`PyScoreReport`] from parallel lists and
-//! returns a [`PollOutcome`] via its `pending` / `checkpoint` / `cancelled` /
+//! returns a [`PyPollOutcome`] via its `pending` / `checkpoint` / `cancelled` /
 //! `final_` / `error` factories.
 //!
 //! `PollOutcome` is exposed as an opaque handle plus `#[staticmethod]`

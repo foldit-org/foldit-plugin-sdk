@@ -287,6 +287,7 @@ typedef void *FolditPluginHandle;
 
 /**
  * One puzzle asset delivered at Init: a name plus its raw bytes.
+ *
  * Borrowed view; the host owns the underlying memory for the duration
  * of the `init` call. The name carries the original filename (extension
  * included) so the plugin can sniff the asset's format.

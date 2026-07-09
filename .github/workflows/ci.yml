@@ -43,6 +43,13 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo +stable doc --no-deps --document-private-items
 
+      - name: Rustdoc (python surface)
+        # The featureless step above never compiles src/python.rs, so intra-doc
+        # links in that module go unchecked unless we build with the feature.
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo +stable doc --no-deps --document-private-items --features python
+
   python:
     name: Python binding tests
     runs-on: ubuntu-latest
@@ -65,6 +72,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  machete:
+    name: Unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-machete
+        run: cargo install --locked cargo-machete
+      - run: cargo machete
+
+  file-lengths:
+    name: File lengths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check file lengths (max 800 lines)
+        run: python3 scripts/check_file_lengths.py
 
   publish-check:
     name: Publish dry-run
