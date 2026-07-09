@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, dev]
   pull_request:
+  # Lets release.yml gate publishing on these same gates rather than
+  # duplicating them. Uses no secrets, so the caller needs no `secrets:`.
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
