@@ -239,7 +239,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldit-plugin-sdk"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "cbindgen",
  "molex",
@@ -417,9 +417,9 @@ dependencies = [
 
 [[package]]
 name = "molex"
-version = "0.7.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53aa5ba569ec58704eb5beb36ab0fb2ff73c593bf9741e7743870521bff7f634"
+checksum = "d098a222092de5d3d6cdceee0dc9f9a9fa99481e4cda9b2baef24547c90d7be2"
 dependencies = [
  "compact_str",
  "flate2",
