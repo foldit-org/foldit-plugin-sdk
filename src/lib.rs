@@ -18,6 +18,7 @@ pub mod abi;
 
 pub mod decode;
 pub mod error;
+pub mod export;
 pub mod plugin;
 pub mod protocol;
 

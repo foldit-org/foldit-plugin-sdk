@@ -239,6 +239,17 @@ message PuzzleAsset {
   bytes data = 2;
 }
 
+// An electron-density map published back to the host by a plugin whose manifest
+// declares `provides_density = true`, as the payload of the well-known "density"
+// query. `data` is the raw mrc bytes of the full-cell map; the host re-crops it
+// for the render lane and forwards the full map to `uses_density` plugins.
+message DensityMap {
+  string name = 1;                  // map file name, e.g. "5xyz-density.mrc"
+  bytes data = 2;                   // raw mrc bytes (full cell)
+  float resolution = 3;             // Angstroms; feeds rosetta edensity::mapreso
+  optional float grid_spacing = 4;  // absent -> derive from the map header
+}
+
 // One atom reference inside a catalytic constraint: an atom name plus the
 // residue it belongs to (residue number + chain). Mirrors foldit-core's
 // puzzle_setup::AtomRef; chain travels as a single-char string (proto has no
