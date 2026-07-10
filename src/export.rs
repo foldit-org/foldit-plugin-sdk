@@ -2,8 +2,8 @@
 //! symbol the host dlopens.
 //!
 //! Marshalling lives in free functions here so it is unit-testable; the
-//! [`export_plugin!`] macro only emits the `extern "C"` entry points and the
-//! static vtable.
+//! [`export_plugin!`](crate::export_plugin) macro only emits the `extern "C"`
+//! entry points and the static vtable.
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -35,7 +35,11 @@ pub fn buffer_from_vec(mut v: Vec<u8>) -> FolditPluginBuffer {
     }
     let (data, len, capacity) = (v.as_mut_ptr(), v.len(), v.capacity());
     std::mem::forget(v);
-    FolditPluginBuffer { data, len, capacity }
+    FolditPluginBuffer {
+        data,
+        len,
+        capacity,
+    }
 }
 
 /// Release a buffer previously produced by [`buffer_from_vec`].
@@ -158,8 +162,9 @@ pub unsafe fn ctx_from_c(ctx: *const FolditPluginDispatchContext) -> DispatchCon
     }
     let c = unsafe { &*ctx };
     DispatchContext {
-        focused_entity_id: (c.has_focused_entity == 1)
-            .then(|| molex::EntityId::from_raw(u32::try_from(c.focused_entity_id).unwrap_or_default())),
+        focused_entity_id: (c.has_focused_entity == 1).then(|| {
+            molex::EntityId::from_raw(u32::try_from(c.focused_entity_id).unwrap_or_default())
+        }),
         selection: unsafe { residues_from_raw(c.selection, c.selection_len) },
         designable: unsafe { residues_from_raw(c.designable, c.designable_len) },
     }
@@ -186,9 +191,9 @@ pub unsafe fn params_from_c(
                 FolditPluginParamTag::Int => ParamValue::Int(v.int_value),
                 FolditPluginParamTag::Float => ParamValue::Float(v.float_value),
                 FolditPluginParamTag::Bool => ParamValue::Bool(v.bool_value != 0),
-                FolditPluginParamTag::String => {
-                    ParamValue::String(unsafe { str_from_raw(v.string_data, v.string_len) }?.to_owned())
-                }
+                FolditPluginParamTag::String => ParamValue::String(
+                    unsafe { str_from_raw(v.string_data, v.string_len) }?.to_owned(),
+                ),
                 FolditPluginParamTag::Vec3 => {
                     ParamValue::Vec3([v.vec3_value.x, v.vec3_value.y, v.vec3_value.z])
                 }
@@ -317,7 +322,9 @@ macro_rules! export_plugin {
                     ctor(::std::str::from_utf8(bytes).unwrap_or("{}"))
                 });
                 match built {
-                    Ok(p) => ::std::boxed::Box::into_raw(::std::boxed::Box::new(p)).cast::<c_void>(),
+                    Ok(p) => {
+                        ::std::boxed::Box::into_raw(::std::boxed::Box::new(p)).cast::<c_void>()
+                    }
                     Err(_) => ::std::ptr::null_mut(),
                 }
             }
@@ -483,8 +490,7 @@ macro_rules! export_plugin {
             ) -> FolditPluginStatus {
                 unsafe {
                     call(out_err, || {
-                        plugin(handle)
-                            .update_stream(request_id, &params_from_c(params, params_len))
+                        plugin(handle).update_stream(request_id, &params_from_c(params, params_len))
                     })
                 }
             }
@@ -623,6 +629,12 @@ mod tests {
         }
     }
 
+    // `export_plugin!` requires a `fn(&str) -> Result<Box<dyn Plugin>>`; this
+    // one is infallible, so the wrap is the trait's shape, not a real fallible.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "signature is fixed by export_plugin!"
+    )]
     fn ctor(_config_json: &str) -> Result<Box<dyn Plugin>> {
         Ok(Box::new(Dummy))
     }
@@ -654,7 +666,11 @@ mod tests {
         let mut buf = FolditPluginBuffer::empty();
         let status = unsafe { (vt.register)(handle, &raw mut buf, &raw mut err) };
         assert!(matches!(status, FolditPluginStatus::Ok));
-        let reg = proto::PluginRegistration::decode(&unsafe { take(&mut buf, vt) }[..]).unwrap();
+        // `unwrap_or_default` rather than `unwrap`: a decode failure yields the
+        // empty registration, and the id assertion below fails on it with a
+        // clear message instead of a bare unwrap panic.
+        let reg = proto::PluginRegistration::decode(&unsafe { take(&mut buf, vt) }[..])
+            .unwrap_or_default();
         assert_eq!(reg.id, "dummy");
 
         // init -> session id + normalized assembly echoed back
@@ -683,11 +699,16 @@ mod tests {
         let mut poll = FolditPluginBuffer::empty();
         let status = unsafe { (vt.poll_stream)(handle, 1, &raw mut poll, &raw mut err) };
         assert!(matches!(status, FolditPluginStatus::Ok));
-        let resp = proto::PollStreamResponse::decode(&unsafe { take(&mut poll, vt) }[..]).unwrap();
-        match resp.result {
-            Some(proto::poll_stream_response::Result::Final(f)) => assert_eq!(f.assembly, [1, 2, 3]),
-            other => panic!("expected Final, got {other:?}"),
-        }
+        let resp = proto::PollStreamResponse::decode(&unsafe { take(&mut poll, vt) }[..])
+            .unwrap_or_default();
+        assert!(
+            matches!(
+                resp.result,
+                Some(proto::poll_stream_response::Result::Final(ref f)) if f.assembly == [1, 2, 3]
+            ),
+            "poll_stream must return Final with the echoed assembly, got {:?}",
+            resp.result
+        );
 
         // An unimplemented method must report Unsupported, not Err.
         let mut out = FolditPluginBuffer::empty();
